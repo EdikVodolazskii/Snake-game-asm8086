@@ -4,58 +4,58 @@ CODESEG
 ORG 100h
 
 start:
-    ; --- 1. Настройка сегментов (для COM файла DS=CS) ---
+    ; Set up segments for COM file
     mov ax, cs
     mov ds, ax
     
-    ; --- 2. Видеорежим 80x25 ---
+    ; Set Video Mode 03h (80x25 Text)
     mov ax, 0003h
     int 10h
 
-    ; --- 3. Прячем курсор ---
+    ; Hide Cursor
     mov ah, 01h
     mov cx, 2607h
     int 10h
 
-    ; --- 4. Настройка ES на видеопамять ---
+    ; ES points to Video Memory (B800h)
     mov ax, 0B800h
     mov es, ax
 
-    ; --- 5. ИНИЦИАЛИЗАЦИЯ (Самая важная часть) ---
-    ; Заполняем координаты вручную через указатели, чтобы точно сработало
+    ; --- Initialize Snake Position ---
+    ; We manually set the first 3 segments to avoid array offset issues
     
-    ; Голова (index 0) = 40, 12
+    ; Head (Index 0) at 40, 12
     lea bx, [SnakeX]
-    mov [byte ptr bx], 40      ; X головы
+    mov [byte ptr bx], 40
     lea bx, [SnakeY]
-    mov [byte ptr bx], 12      ; Y головы
+    mov [byte ptr bx], 12
     
-    ; Тело (index 1) = 39, 12
+    ; Body (Index 1) at 39, 12
     lea bx, [SnakeX]
     mov [byte ptr bx+1], 39
     lea bx, [SnakeY]
     mov [byte ptr bx+1], 12
     
-    ; Хвост (index 2) = 38, 12
+    ; Tail (Index 2) at 38, 12
     lea bx, [SnakeX]
     mov [byte ptr bx+2], 38
     lea bx, [SnakeY]
     mov [byte ptr bx+2], 12
     
     mov [SnakeLen], 3
-    mov [CurrentDir], 4        ; 4 = Вправо
+    mov [CurrentDir], 4        ; Start moving Right
 
-    ; --- 6. Первая отрисовка ---
+    ; Initial Draw
     call DrawSnake
     call CreateFood
 
 ; =========================================================
-; ГЛАВНЫЙ ЦИКЛ
+; Main Game Loop
 ; =========================================================
 GameLoop:
 
-    ; --- A. ЗАДЕРЖКА (Delay) ---
-    mov cx, 02h          ; Скорость (увеличь до 03h или 04h, если быстро)
+    ; --- Delay Loop ---
+    mov cx, 02h          ; Speed adjustment (increase to slow down)
 DelayOut:
     mov dx, 0FFFFh
 DelayIn:
@@ -63,15 +63,15 @@ DelayIn:
     jnz DelayIn
     loop DelayOut
 
-    ; --- B. ПРОВЕРКА КЛАВИШ ---
-    mov ah, 01h          ; Есть нажатие?
+    ; --- Input Handling ---
+    mov ah, 01h          ; Check keyboard buffer
     int 16h
-    jz MoveLogic         ; Нет -> просто двигаем змею
+    jz MoveLogic         ; No key pressed, continue movement
     
-    mov ah, 00h          ; Читаем клавишу
+    mov ah, 00h          ; Get key
     int 16h
     
-    ; WASD
+    ; WASD Controls
     cmp al, 'w'
     je DirUp
     cmp al, 's'
@@ -83,7 +83,7 @@ DelayIn:
     jmp MoveLogic
 
 DirUp:
-    cmp [CurrentDir], 2
+    cmp [CurrentDir], 2  ; Prevent 180 turn
     je MoveLogic
     mov [CurrentDir], 1
     jmp MoveLogic
@@ -103,37 +103,35 @@ DirRight:
     mov [CurrentDir], 4
 
 ; =========================================================
-; ЛОГИКА ДВИЖЕНИЯ
+; Game Logic
 ; =========================================================
 MoveLogic:
 
-    ; 1. СТИРАЕМ ХВОСТ
-    ; Нам нужно взять координаты последнего элемента
+    ; 1. Erase Tail
     xor bx, bx
     mov bl, [SnakeLen]
-    dec bl                 ; Индекс хвоста
+    dec bl                 ; Get tail index
     
     lea si, [SnakeX]
-    mov al, [si+bx]        ; X хвоста
+    mov al, [si+bx]        ; Load X
     lea si, [SnakeY]
-    mov dl, [si+bx]        ; Y хвоста
+    mov dl, [si+bx]        ; Load Y
     
-    call EraseChar         ; Стираем с экрана
+    call EraseChar
 
-    ; 2. СДВИГАЕМ ТЕЛО (Копируем координаты i-1 в i)
+    ; 2. Shift Body (Copy index i-1 to i)
     xor cx, cx
     mov cl, [SnakeLen]
-    dec cl                 ; Количество сдвигов
+    dec cl                 ; Number of shifts
     
-    ; Начинаем с хвоста
-    mov bl, cl             ; bl = текущий индекс (например, 2)
+    mov bl, cl             ; Start from end
 ShiftLoop:
-    ; X[i] = X[i-1]
+    ; Shift X
     lea si, [SnakeX]
-    mov al, [si+bx-1]      ; берем предыдущий
-    mov [si+bx], al        ; пишем в текущий
+    mov al, [si+bx-1]
+    mov [si+bx], al
     
-    ; Y[i] = Y[i-1]
+    ; Shift Y
     lea si, [SnakeY]
     mov al, [si+bx-1]
     mov [si+bx], al
@@ -141,11 +139,11 @@ ShiftLoop:
     dec bx
     loop ShiftLoop
 
-    ; 3. ДВИГАЕМ ГОЛОВУ (Index 0)
+    ; 3. Update Head Position
     lea si, [SnakeX]
-    mov al, [si]           ; Текущий X головы
+    mov al, [si]
     lea si, [SnakeY]
-    mov dl, [si]           ; Текущий Y головы
+    mov dl, [si]
     
     cmp [CurrentDir], 1
     je GoUp
@@ -165,10 +163,10 @@ GoLeft:  dec al
 GoRight: inc al
 
 ; =========================================================
-; ПРОВЕРКИ
+; Collision Checks
 ; =========================================================
 CheckHit:
-    ; -- Стены --
+    ; Wall Collision
     cmp al, 0
     jl GameOver
     cmp al, 80
@@ -178,34 +176,31 @@ CheckHit:
     cmp dl, 25
     jge GameOver
 
-    ; -- Сохраняем новую голову --
+    ; Save New Head Position
     lea si, [SnakeX]
     mov [si], al
     lea si, [SnakeY]
     mov [si], dl
     
-    ; -- Еда --
+    ; Food Collision
     cmp al, [FoodX]
     jne NoEat
     cmp dl, [FoodY]
     jne NoEat
     
-    ; СЪЕЛИ!
+    ; Eat Food
     inc [SnakeLen]
     call CreateFood
-    ; (Хвост не стирали бы, если бы логика была сложнее, 
-    ; но тут просто вырастет на следующем кадре)
 
 NoEat:
-    ; Рисуем голову
     call DrawHead
     jmp GameLoop
 
 ; =========================================================
-; КОНЕЦ
+; Exit Routine
 ; =========================================================
 GameOver:
-    mov ax, 0003h
+    mov ax, 0003h        ; Clear Screen
     int 10h
     
     mov dx, offset MsgOver
@@ -216,46 +211,46 @@ GameOver:
     int 21h
 
 ; =========================================================
-; ПРОЦЕДУРЫ
+; Procedures
 ; =========================================================
 
 PROC DrawHead
     lea si, [SnakeX]
-    mov al, [si]       ; X
+    mov al, [si]
     lea si, [SnakeY]
-    mov dl, [si]       ; Y
+    mov dl, [si]
     
-    mov bl, 02h        ; Зеленый
-    mov cl, '0'        ; Символ
+    mov bl, 02h          ; Green
+    mov cl, '0'
     call PutPixel
     ret
 ENDP DrawHead
 
 PROC EraseChar
-    mov bl, 0          ; Черный
+    mov bl, 0            ; Black
     mov cl, ' '
     call PutPixel
     ret
 ENDP EraseChar
 
 PROC PutPixel
-    ; Вход: AL=X, DL=Y, CL=Sym, BL=Color
+    ; Inputs: AL=X, DL=Y, CL=Char, BL=Color
     push ax bx dx di es
     
-    ; Offset = (Y * 80 + X) * 2
+    ; Calculate Offset: (Y * 80 + X) * 2
     xor dh, dh
     push ax
     mov al, 80
-    mul dl             ; AX = Y * 80
+    mul dl               ; AX = Y * 80
     mov di, ax
     pop ax
     
     xor ah, ah
     add di, ax
-    add di, di         ; * 2
+    add di, di           ; Multiply by 2 (Char + Attribute)
     
-    mov es:[di], cl
-    mov es:[di+1], bl
+    mov es:[di], cl      ; Draw Char
+    mov es:[di+1], bl    ; Draw Color
     
     pop es di dx bx ax
     ret
@@ -271,7 +266,7 @@ DrLoop:
     lea si, [SnakeY]
     mov dl, [si+bx]
     
-    push bx cx         ; Сохраним счетчики
+    push bx cx
     
     mov bl, 02h
     mov cl, '0'
@@ -284,11 +279,11 @@ DrLoop:
 ENDP DrawSnake
 
 PROC CreateFood
-    ; Простой рандом (из таймера)
+    ; Generate Random via Timer
     mov ah, 00h
     int 1Ah
     
-    ; X
+    ; Calculate X
     mov ax, dx
     xor dx, dx
     mov cx, 76
@@ -296,26 +291,26 @@ PROC CreateFood
     add dl, 2
     mov [FoodX], dl
     
-    ; Y
-    mov ax, dx ; берем остаток от X для энтропии
-    add ax, [word ptr SnakeX] 
+    ; Calculate Y
+    mov ax, dx
+    add ax, [word ptr SnakeX] ; Add entropy
     xor dx, dx
     mov cx, 20
     div cx
     add dl, 2
     mov [FoodY], dl
     
-    ; Draw
+    ; Draw Food
     mov al, [FoodX]
     mov dl, [FoodY]
-    mov bl, 04h        ; Красный
+    mov bl, 04h          ; Red
     mov cl, '*'
     call PutPixel
     ret
 ENDP CreateFood
 
 ; =========================================================
-; ДАННЫЕ (В конце для COM файла)
+; Data Section
 ; =========================================================
 MsgOver    db 'Game Over!$'
 FoodX      db ?
